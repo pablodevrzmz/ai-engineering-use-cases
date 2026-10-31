@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artifacts on AWS</title>
+<style>
+  :root { --ink: #1f2328; --muted: #656d76; --line: #d0d7de; --bg: #f6f8fa; --card: #fff; --accent: #0969da; --bad: #cf222e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; max-width: 760px; margin: 0 auto; padding: 16px; }
+  header h1 { font-size: 18px; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 0 16px 32px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  label { display: block; margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+  .pw { display: flex; gap: 6px; }
+  .pw input { flex: 1; }
+  .pw button { background: var(--card); color: var(--ink); border-color: var(--line); white-space: nowrap; }
+  input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  textarea { resize: vertical; min-height: 64px; }
+  button { padding: 8px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+  button.secondary { background: var(--card); color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .layout { display: grid; grid-template-columns: 220px 1fr; gap: 12px; }
+  @media (max-width: 640px) { .layout { grid-template-columns: 1fr; } }
+  .threads button { display: block; width: 100%; text-align: left; margin-top: 6px; background: var(--card); color: var(--ink); border-color: var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .threads button.active { border-color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+  .msg { padding: 10px 12px; border-radius: 8px; margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { background: #ddf4ff; margin-left: 15%; }
+  .msg.assistant { background: var(--bg); margin-right: 15%; }
+  .chip { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #fff8c5; border: 1px solid #d4a72c; margin-top: 6px; }
+  .file { display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--card); }
+  .file .title { font-weight: 600; }
+  .composer { display: flex; gap: 8px; align-items: flex-end; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Artifacts on AWS</h1>
+  <div id="who" class="muted"></div>
+</header>
+<main>
+  <!-- Sign-in: the browser talks to Cognito directly; the API only ever sees the ID token. -->
+  <section id="login" class="card hidden">
+    <h2 style="margin-top:0">Sign in</h2>
+    <form id="loginForm">
+      <label for="email">Email</label><input id="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <div class="pw">
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="button" id="togglePassword" aria-pressed="false" aria-label="Show password">Show</button>
+      </div>
+      <p class="error" id="loginError"></p>
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <section id="app" class="layout hidden">
+    <aside class="card threads">
+      <button id="newThread" class="secondary" style="width:100%">New thread</button>
+      <div id="threadList"></div>
+    </aside>
+    <div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong id="threadTitle">New thread</strong>
+          <button id="deleteThread" class="secondary hidden">Delete</button>
+        </div>
+        <p class="muted">Transcripts are not stored: reloading a thread shows only the files it produced. Files expire 30 days after publication.</p>
+        <div id="messages"></div>
+        <div id="hint" class="muted hidden">Starting the agent... the first run can take up to a minute.</div>
+      </div>
+      <div class="card composer">
+        <textarea id="prompt" placeholder="Ask for a file, e.g. “Create a CSV of 10 fruits with name, color and price, and publish it.”"></textarea>
+        <button id="send">Send</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---- state ------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const state = { config: null, token: null, email: null, threads: [], current: null, streaming: false };
+
+// ---- session (sessionStorage so a tab close signs you out) ------------
+function loadSession() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("session") || "null");
+    if (saved && saved.exp > Date.now()) { state.token = saved.idToken; state.email = saved.email; }
+  } catch (e) { /* ignore corrupt storage */ }
+}
+function saveSession(idToken, expiresInSeconds, email) {
+  state.token = idToken; state.email = email;
+  sessionStorage.setItem("session", JSON.stringify({ idToken, email, exp: Date.now() + expiresInSeconds * 1000 }));
+}
+function signOut() {
+  sessionStorage.removeItem("session");
+  state.token = null; state.email = null; state.threads = []; state.current = null;
+  render();
+}
+
+// ---- API helper: adds the bearer token, maps 401 to "sign in again" -----
+async function api(path, options = {}) {
+  const headers = Object.assign({ Authorization: "Bearer " + state.token }, options.headers || {});
+  const res = await fetch(path, Object.assign({}, options, { headers }));
+  if (res.status === 401) { signOut(); throw new Error("Session expired, please sign in again."); }
+  if (!res.ok) {
+    let code = res.status; try { code = (await res.json()).error || code; } catch (e) { /* not JSON */ }
+    throw new Error("Request failed: " + code);
+  }
+  return res;
+}
+
+// Show/hide the password: a demo password is long and copied from a file, so let people check it.
+$("togglePassword").addEventListener("click", () => {
+  const input = $("password"), show = input.type === "password";
+  input.type = show ? "text" : "password";
+  const b = $("togglePassword"); b.textContent = show ? "Hide" : "Show";
+  b.setAttribute("aria-pressed", String(show)); b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+});
+
+// ---- Cognito sign-in (USER_PASSWORD_AUTH, no hosted UI) -----------------
+async function signIn(email, password) {
+  const { region, clientId } = state.config;
+  const res = await fetch(`https://cognito-idp.${region}.amazonaws.com/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-amz-json-1.1", "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth" },
+    body: JSON.stringify({ AuthFlow: "USER_PASSWORD_AUTH", ClientId: clientId, AuthParameters: { USERNAME: email, PASSWORD: password } }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || data.__type || "Sign-in failed");
+  if (!data.AuthenticationResult) throw new Error("Unexpected challenge: " + data.ChallengeName + " (the demo user needs a permanent password)");
+  saveSession(data.AuthenticationResult.IdToken, data.AuthenticationResult.ExpiresIn, email);
+}
+
+// ---- threads -----------------------------------------------------------
+async function loadThreads() {
+  state.threads = (await (await api("/v1/threads")).json()).threads;
+  renderThreads();
+}
+async function selectThread(thread) {
+  state.current = thread;
+  $("messages").innerHTML = "";
+  renderThreads();
+  if (!thread) return;
+  // No transcript is kept, so restoring a thread means re-rendering its files.
+  const { files } = await (await api(`/v1/threads/${thread.threadId}/files`)).json();
+  files.forEach((f) => $("messages").appendChild(fileCard(f)));
+}
+async function ensureThread(firstPrompt) {
+  if (state.current) return state.current;
+  const res = await api("/v1/threads", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: firstPrompt.slice(0, 60) }),
+  });
+  const thread = await res.json();
+  state.threads.unshift(thread); state.current = thread; renderThreads();
+  return thread;
+}
+async function deleteCurrent() {
+  if (!state.current || !confirm("Delete this thread and its files?")) return;
+  await api(`/v1/threads/${state.current.threadId}`, { method: "DELETE" });
+  state.threads = state.threads.filter((t) => t.threadId !== state.current.threadId);
+  selectThread(null);
+}
+
+// ---- running a turn: POST + stream the SSE events -----------------------
+async function send() {
+  const prompt = $("prompt").value.trim();
+  if (!prompt || state.streaming) return;
+  state.streaming = true; $("send").disabled = true; $("prompt").value = "";
+  addMessage("user", prompt);
+  const bubble = addMessage("assistant", "");
+  const chip = document.createElement("span"); chip.className = "chip hidden"; bubble.after(chip);
+  $("hint").classList.remove("hidden");
+  try {
+    const thread = await ensureThread(prompt);
+    const res = await api(`/v1/threads/${thread.threadId}/runs`, {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({ prompt }),
+    });
+    await readEvents(res, (event) => {
+      $("hint").classList.add("hidden");
+      switch (event.type) {
+        case "text": bubble.textContent += event.delta; break;
+        case "tool":
+          chip.textContent = "Running " + (event.name || "tool") + "...";
+          chip.classList.toggle("hidden", event.status !== "start");
+          break;
+        case "file": chip.after(fileCard(event)); break;
+        case "done": chip.classList.add("hidden"); break;
+        case "error": chip.classList.add("hidden"); addNote(bubble, event.code + ": " + event.message); break;
+      }
+    });
+  } catch (err) {
+    addNote(bubble, err.message);
+  } finally {
+    state.streaming = false; $("send").disabled = false; chip.classList.add("hidden"); $("hint").classList.add("hidden");
+  }
+}
+
+// Minimal SSE parser over fetch(): events are separated by a blank line,
+// comment lines start with ":" (our heartbeats), data lines start with "data:".
+async function readEvents(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+      const data = block.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+      if (!data) continue;
+      try { onEvent(JSON.parse(data)); } catch (e) { console.warn("bad event", data); }
+    }
+  }
+}
+
+// ---- downloads: ask the API for a presigned URL, then let S3 serve it ----
+async function download(fileId) {
+  const { url } = await (await api(`/v1/threads/${state.current.threadId}/files/${fileId}`)).json();
+  location.assign(url);  // Content-Disposition: attachment, so the page stays
+}
+
+// ---- rendering ---------------------------------------------------------
+function addMessage(role, text) {
+  const div = document.createElement("div"); div.className = "msg " + role; div.textContent = text;
+  $("messages").appendChild(div); div.scrollIntoView({ block: "end" });
+  return div;
+}
+function addNote(after, text) {
+  const p = document.createElement("p"); p.className = "error"; p.textContent = text; after.after(p);
+}
+function fileCard(f) {
+  const card = document.createElement("div"); card.className = "file";
+  const info = document.createElement("div");
+  info.innerHTML = `<div class="title"></div><div class="muted"></div>`;
+  info.querySelector(".title").textContent = f.title || f.name;
+  info.querySelector(".muted").textContent = `${f.name} · ${humanSize(f.size)} · expires ${new Date(f.expiresAt).toLocaleDateString()}`;
+  const btn = document.createElement("button"); btn.textContent = "Download"; btn.onclick = () => download(f.fileId).catch((e) => alert(e.message));
+  card.append(info, btn);
+  return card;
+}
+function humanSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  const units = ["KB", "MB", "GB"]; let i = -1;
+  do { bytes /= 1024; i++; } while (bytes >= 1024 && i < units.length - 1);
+  return bytes.toFixed(1) + " " + units[i];
+}
+function renderThreads() {
+  const list = $("threadList"); list.innerHTML = "";
+  state.threads.forEach((t) => {
+    const b = document.createElement("button"); b.textContent = t.title; b.title = t.title;
+    if (state.current && t.threadId === state.current.threadId) b.className = "active";
+    b.onclick = () => selectThread(t).catch((e) => alert(e.message));
+    list.appendChild(b);
+  });
+  $("threadTitle").textContent = state.current ? state.current.title : "New thread";
+  $("deleteThread").classList.toggle("hidden", !state.current);
+}
+function render() {
+  const signedIn = Boolean(state.token);
+  $("login").classList.toggle("hidden", signedIn);
+  $("app").classList.toggle("hidden", !signedIn);
+  $("who").innerHTML = "";
+  if (signedIn) {
+    $("who").textContent = state.email + " · ";
+    const out = document.createElement("a"); out.href = "#"; out.textContent = "Sign out"; out.onclick = (e) => { e.preventDefault(); signOut(); };
+    $("who").appendChild(out);
+    loadThreads().catch((e) => alert(e.message));
+  }
+}
+
+// ---- wiring ------------------------------------------------------------
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault(); $("loginError").textContent = "";
+  try { await signIn($("email").value.trim(), $("password").value); render(); }
+  catch (err) { $("loginError").textContent = err.message; }
+};
+$("newThread").onclick = () => selectThread(null);
+$("deleteThread").onclick = () => deleteCurrent().catch((e) => alert(e.message));
+$("send").onclick = send;
+$("prompt").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+
+(async function start() {
+  state.config = await (await fetch("/config.json")).json();
+  loadSession();
+  render();
+})();
+</script>
+</body>
+</html>

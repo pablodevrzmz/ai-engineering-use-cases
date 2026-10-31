@@ -1,0 +1,13 @@
+# Agent container (Amazon Bedrock AgentCore Runtime, linux/arm64, Python 3.13).
+#
+# strands-agents-tools is pinned exactly: app/sandbox.py relies on two protected
+# members of its AgentCoreCodeInterpreter (_ensure_session and _sessions) and on
+# the module-level _session_mapping cache. Re-check sandbox.py before bumping it.
+# bedrock-agentcore is pinned to the version those two were developed against;
+# the [strands-agents] extra is the one the AgentCore SDK publishes for Strands.
+strands-agents==1.56.0
+strands-agents-tools==0.8.9
+bedrock-agentcore[strands-agents]==1.23.1
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34
+boto3>=1.35

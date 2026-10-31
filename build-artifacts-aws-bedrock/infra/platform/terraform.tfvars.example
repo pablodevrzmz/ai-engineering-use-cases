@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is git-ignored.
+# image_tag is not set here: the Makefile passes it (-var image_tag=...).
+
+region = "us-east-1"
+name   = "artifacts-demo"
+
+# Demo sign-in created by Terraform in Cognito (admin-created, already confirmed).
+# Password policy: 12+ chars with lower, upper, digit and a symbol.
+demo_user_email    = "you@example.com"
+demo_user_password = "Replace-this-password-1"
+
+# Model the agent runs on (cross-region inference profiles).
+# model_id = "us.amazon.nova-pro-v1:0"      # default
+# model_id = "us.amazon.nova-premier-v1:0"  # stronger at tool use, costs more
+# model_id = "us.amazon.nova-2-lite-v1:0"   # cheapest
+
+# Optional knobs (defaults shown).
+# files_ttl_days                   = 30
+# files_max_bytes                  = 15728640
+# files_url_ttl_seconds            = 300
+# code_interpreter_session_seconds = 3600
+# thread_ttl_days                  = 30
+# api_cpu                          = 512
+# api_memory                       = 1024
+# log_retention_days               = 14
+
+# Use your own VPC instead of the default one (public subnets in two or more AZs).
+# vpc_id            = "vpc-0123456789abcdef0"
+# public_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+
+# Serve HTTPS: point a DNS name at the ALB and give it a matching ACM certificate.
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"

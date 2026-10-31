@@ -1,0 +1,11 @@
+# Shared test dependencies for services/api and services/agent.
+# Install into a virtualenv, never into the project folder:
+#   python3 -m venv .venv && .venv/bin/pip install -r services/api/requirements.txt -r requirements-dev.txt
+pytest>=8.3
+pytest-asyncio>=0.24
+moto[s3,dynamodb]>=5.0
+httpx>=0.28
+PyJWT[crypto]>=2.9
+cryptography>=43
+boto3>=1.35
+certifi>=2024.2
