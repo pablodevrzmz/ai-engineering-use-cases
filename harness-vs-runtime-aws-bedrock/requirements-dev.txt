@@ -1,0 +1,7 @@
+# Local tooling: the offline unit tests of services/agent and the chat/smoke clients.
+# Install into a virtualenv, never into the project folder (`make venv` does this).
+# boto3 >= 1.43 is the first release whose bedrock-agentcore client has invoke_harness.
+pytest>=8.3
+pytest-asyncio>=0.24
+httpx>=0.28
+boto3>=1.43

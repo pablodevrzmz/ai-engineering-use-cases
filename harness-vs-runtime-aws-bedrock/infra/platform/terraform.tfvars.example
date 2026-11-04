@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is git-ignored.
+# image_tag is not set here: the Makefile passes it (-var image_tag=...).
+
+region = "us-east-1"          # must offer the Web Search Tool: us-east-1, us-east-2, us-west-2, eu-west-1, ap-southeast-2, ap-northeast-1
+name   = "harness-vs-runtime"
+
+# Model BOTH flavors run on (cross-region inference profiles).
+# model_id = "us.amazon.nova-2-lite-v1:0"                    # default: cheapest model that handles the WebSearch tool schema
+# model_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"   # cheap Anthropic option, strong tool use; needs model access
+# model_id = "global.anthropic.claude-sonnet-4-6"            # the harness's own default; needs model access
+# model_id = "us.amazon.nova-pro-v1:0"                       # FAILS on this tool schema (modelStreamErrorException), kept for the record
+
+# Harness memory: "managed" (default; AgentCore creates a Memory, deleted with the harness) or "disabled".
+# harness_memory = "managed"
+
+# Deploy only the harness (no Docker, no ECR stack): the Makefile passes this as ENABLE_RUNTIME=false.
+# enable_runtime = false
+
+# Output-token budget per harness invocation (PoC guard).
+# harness_max_tokens = 60000

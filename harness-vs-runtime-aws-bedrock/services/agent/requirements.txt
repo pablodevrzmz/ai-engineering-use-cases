@@ -1,0 +1,9 @@
+# Agent container (Amazon Bedrock AgentCore Runtime, linux/arm64, Python 3.13).
+#
+# Deliberately short: the Runtime flavor is "the harness, written out by hand", so it carries only the agent
+# framework, the SigV4 MCP transport that reaches the AgentCore Gateway, and the HTTP server AgentCore talks to.
+strands-agents==1.56.0
+mcp-proxy-for-aws==1.7.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34
+boto3>=1.35
